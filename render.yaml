@@ -3,7 +3,7 @@ services:
     name: ecom-loyalty-backend
     env: node
     buildCommand: npm install && npm run build
-    startCommand: npm run start:prod
+    startCommand: node dist/main.js
     envVars:
       - key: NODE_ENV
         value: production
