@@ -12,7 +12,7 @@ export class ProductsService {
     private notificationGateway: NotificationGateway
   ) {}
 
-  async findAll(query?: QueryProductsDto): Promise<{ products: Product[]; total: number; page: number; pages: number }> {
+  async findAll(query?: QueryProductsDto): Promise<{ products: any[]; total: number; page: number; pages: number }> {
     const { search, category, loyaltyType, onSale, minPrice, maxPrice, page = 1, limit = 20, sortBy = 'createdAt' } = query || {};
     
     const filter: any = {};
@@ -53,18 +53,41 @@ export class ProductsService {
       this.productModel.countDocuments(filter).exec()
     ]);
     
+    const mappedProducts = products.map(p => ({
+      ...p.toObject(),
+      id: p._id,
+      srcUrl: p.images?.[0] || '',
+      gallery: p.images || [],
+      rating: 4.5,
+      discount: {
+        amount: 0,
+        percentage: p.isOnSale && p.salePrice ? Math.round(((p.price - p.salePrice) / p.price) * 100) : 0
+      }
+    }));
+    
     return {
-      products,
+      products: mappedProducts,
       total,
       page,
       pages: Math.ceil(total / limit)
     };
   }
 
-  async findOne(id: string): Promise<Product> {
+  async findOne(id: string): Promise<any> {
     const product = await this.productModel.findById(id).exec();
     if (!product) throw new NotFoundException('Product not found');
-    return product;
+    
+    return {
+      ...product.toObject(),
+      id: product._id,
+      srcUrl: product.images?.[0] || '',
+      gallery: product.images || [],
+      rating: 4.5,
+      discount: {
+        amount: 0,
+        percentage: product.isOnSale && product.salePrice ? Math.round(((product.price - product.salePrice) / product.price) * 100) : 0
+      }
+    };
   }
 
   async create(createProductDto: CreateProductDto): Promise<Product> {
