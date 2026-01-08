@@ -200,6 +200,19 @@ export class OrdersService {
     return order;
   }
 
+  async cancelOrder(userId: string, orderId: string): Promise<Order> {
+    const order = await this.orderModel.findOne({ _id: orderId, userId });
+    if (!order) throw new NotFoundException('Order not found');
+    
+    if (!['PENDING', 'CONFIRMED'].includes(order.status.toUpperCase())) {
+      throw new BadRequestException('Order cannot be cancelled');
+    }
+    
+    order.status = 'CANCELLED';
+    await order.save();
+    return order;
+  }
+
   async findAll(query?: { status?: string; page?: number; limit?: number }): Promise<{ orders: Order[]; total: number }> {
     const { status, page = 1, limit = 20 } = query || {};
     const filter: any = {};

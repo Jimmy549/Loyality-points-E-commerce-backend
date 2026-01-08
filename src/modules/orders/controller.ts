@@ -26,6 +26,11 @@ export class OrdersController {
     return this.ordersService.checkout(user.sub, createOrderDto);
   }
 
+  @Patch(':id/cancel')
+  cancelOrder(@CurrentUser() user: any, @Param('id') id: string) {
+    return this.ordersService.cancelOrder(user.sub, id);
+  }
+
   @Patch(':id')
   @UseGuards(RolesGuard)
   @Roles('ADMIN', 'SUPER_ADMIN')
