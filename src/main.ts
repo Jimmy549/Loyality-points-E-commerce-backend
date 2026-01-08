@@ -63,24 +63,8 @@ async function bootstrap() {
   }
   
   // Enable CORS with security considerations
-  const allowedOrigins = process.env.NODE_ENV === 'production' 
-    ? [
-        process.env.FRONTEND_URL || 'https://your-frontend-domain.com',
-        'https://loyality-points-e-commerce-frontend.vercel.app'
-      ]
-    : (process.env.ALLOWED_ORIGINS || 'http://localhost:3000,http://localhost:3001,http://localhost:4500,http://127.0.0.1:3000,http://127.0.0.1:3001,http://127.0.0.1:4500').split(',');
-
   app.enableCors({
-    origin: (origin, callback) => {
-      // Allow requests with no origin (like mobile apps or curl requests)
-      if (!origin) return callback(null, true);
-      
-      if (allowedOrigins.indexOf(origin) !== -1 || allowedOrigins.some(allowed => origin.includes(allowed))) {
-        callback(null, true);
-      } else {
-        callback(new Error('Not allowed by CORS'));
-      }
-    },
+    origin: true, // Allow all origins temporarily for testing
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
