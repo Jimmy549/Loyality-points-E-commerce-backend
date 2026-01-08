@@ -104,4 +104,36 @@ export class ProductsService {
   async getTotalCount(): Promise<number> {
     return this.productModel.countDocuments().exec();
   }
+
+  async startSale(id: string, salePrice: number): Promise<Product> {
+    const product = await this.productModel.findByIdAndUpdate(
+      id,
+      { isOnSale: true, salePrice },
+      { new: true }
+    ).exec();
+    
+    if (!product) throw new NotFoundException('Product not found');
+    
+    // Broadcast sale notification to all users
+    this.notificationGateway.emitSaleStarted({
+      productId: product._id.toString(),
+      title: product.title,
+      originalPrice: product.price,
+      salePrice: product.salePrice,
+      message: `🔥 Sale Alert! ${product.title} is now on sale!`
+    });
+    
+    return product;
+  }
+
+  async endSale(id: string): Promise<Product> {
+    const product = await this.productModel.findByIdAndUpdate(
+      id,
+      { isOnSale: false, salePrice: null },
+      { new: true }
+    ).exec();
+    
+    if (!product) throw new NotFoundException('Product not found');
+    return product;
+  }
 }

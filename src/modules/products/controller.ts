@@ -135,4 +135,25 @@ export class ProductsController {
   delete(@Param('id') id: string) {
     return this.productsService.delete(id);
   }
+
+  @Post(':id/start-sale')
+  @UseGuards(AuthGuard, RolesGuard)
+  @Roles('ADMIN', 'SUPER_ADMIN')
+  @ApiOperation({ summary: 'Start sale for product and notify users (Admin only)' })
+  @ApiResponse({ status: 200, description: 'Sale started and notifications sent' })
+  async startSale(
+    @Param('id') id: string,
+    @Body() body: { salePrice: number }
+  ) {
+    return this.productsService.startSale(id, body.salePrice);
+  }
+
+  @Post(':id/end-sale')
+  @UseGuards(AuthGuard, RolesGuard)
+  @Roles('ADMIN', 'SUPER_ADMIN')
+  @ApiOperation({ summary: 'End sale for product (Admin only)' })
+  @ApiResponse({ status: 200, description: 'Sale ended successfully' })
+  async endSale(@Param('id') id: string) {
+    return this.productsService.endSale(id);
+  }
 }
