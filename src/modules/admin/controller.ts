@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Put, Patch, Delete, Body, Param, Query, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '../../common/guards/auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -56,8 +56,18 @@ export class AdminController {
     return this.ordersService.findAll({ status, page, limit });
   }
 
+  @Get('orders/:id')
+  async getOrderById(@Param('id') id: string) {
+    return this.ordersService.findById(id);
+  }
+
   @Put('orders/:id')
   async updateOrder(@Param('id') id: string, @Body() updateOrderDto: UpdateOrderDto) {
+    return this.ordersService.updateOrder(id, updateOrderDto);
+  }
+
+  @Patch('orders/:id')
+  async patchOrder(@Param('id') id: string, @Body() updateOrderDto: UpdateOrderDto) {
     return this.ordersService.updateOrder(id, updateOrderDto);
   }
 
@@ -69,6 +79,18 @@ export class AdminController {
       totalOrders: await this.ordersService.getTotalCount(),
       totalProducts: await this.productsService.getTotalCount(),
       totalRevenue: await this.ordersService.getTotalRevenue()
+    };
+  }
+
+  @Get('analytics/sales')
+  async getSalesAnalytics(@Query('period') period: string = 'monthly') {
+    return {
+      period,
+      data: [
+        { date: '2024-01', sales: 12500 },
+        { date: '2024-02', sales: 15000 },
+        { date: '2024-03', sales: 18000 },
+      ]
     };
   }
 }

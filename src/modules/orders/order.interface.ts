@@ -22,6 +22,10 @@ export interface Order {
   pointsEarned: number;
   status: 'PENDING' | 'CONFIRMED' | 'PROCESSING' | 'SHIPPED' | 'DELIVERED' | 'CANCELLED';
   shippingAddress?: ShippingAddress;
+  paymentMethod?: 'stripe' | 'points' | 'hybrid';
+  paymentStatus?: 'pending' | 'paid' | 'failed' | 'refunded';
+  stripeSessionId?: string;
+  stripePaymentIntentId?: string;
   trackingNumber?: string;
   notes?: string;
   createdAt?: Date;

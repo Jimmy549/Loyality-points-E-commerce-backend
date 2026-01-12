@@ -19,13 +19,11 @@ export class OrdersService {
     @InjectModel('User') private userModel: Model<User>,
     private loyaltyService: LoyaltyService,
     private notificationsService: NotificationsService,
-    private paymentsService: PaymentsService
+    private paymentsService: PaymentsService,
   ) {}
 
   async getUserOrders(userId: string): Promise<Order[]> {
     const orders = await this.orderModel.find({ userId }).populate('items.productId').exec();
-    
-    // Transform orders to match frontend expectations
     return orders.map(order => ({
       ...order.toObject(),
       loyaltyPointsEarned: order.pointsEarned,
@@ -36,61 +34,50 @@ export class OrdersService {
   async getOrder(userId: string, orderId: string): Promise<Order> {
     const order = await this.orderModel.findOne({ _id: orderId, userId }).populate('items.productId').exec();
     if (!order) throw new NotFoundException('Order not found');
-    
-    // Transform order to match frontend expectations
-    const transformedOrder = {
+    return {
       ...order.toObject(),
       loyaltyPointsEarned: order.pointsEarned,
       loyaltyPointsUsed: order.pointsUsed,
-    };
-    
-    return transformedOrder as Order;
+    } as Order;
   }
 
-  async checkout(userId: string, createOrderDto: CreateOrderDto): Promise<Order> {
+  async checkout(userId: string, createOrderDto: CreateOrderDto): Promise<any> {
     try {
-      console.log('Starting checkout for user:', userId, 'with data:', createOrderDto);
-      
-      // Get user's cart with populated product details
       let cart = await this.cartModel.findOne({ userId }).populate('items.productId');
       
-      if (!cart || cart.items.length === 0) {
+      // Check if cart exists and has items
+      if (!cart || !cart.items || cart.items.length === 0) {
         throw new BadRequestException('Cart is empty. Please add items to cart before checkout.');
       }
 
       const user = await this.userModel.findById(userId);
-      if (!user) {
-        console.log('User not found:', userId);
-        throw new NotFoundException('User not found');
-      }
-
-      console.log('User found:', user.email, 'Current points:', user.loyaltyPoints);
-      console.log('Cart items:', cart.items.length, 'Total price:', cart.totalPrice);
+      if (!user) throw new NotFoundException('User not found');
 
       // Validate stock
       for (const item of cart.items) {
         const product = await this.productModel.findById(item.productId);
-        if (!product || product.stock < item.quantity) {
-          throw new BadRequestException(`Insufficient stock for ${product?.title || 'product'}`);
+        if (!product) {
+          throw new BadRequestException(`Product not found`);
+        }
+        if (product.stock < item.quantity) {
+          throw new BadRequestException(`Insufficient stock for ${product.title}`);
         }
       }
 
       const pointsToUse = createOrderDto.pointsToUse || 0;
-      console.log('Points to use:', pointsToUse);
-      
-      // Validate loyalty points
-      if (pointsToUse > 0) {
-        if (user.loyaltyPoints < pointsToUse) {
-          throw new BadRequestException(`Insufficient points. Available: ${user.loyaltyPoints}, Required: ${pointsToUse}`);
-        }
+      if (pointsToUse > user.loyaltyPoints) {
+        throw new BadRequestException(`Insufficient points. Available: ${user.loyaltyPoints}`);
       }
 
-      // Calculate final amount after points deduction (100 points = $5)
+      // Calculate final amount
       const pointsValue = Math.floor(pointsToUse / 100) * 5;
       const finalAmount = Math.max(0, cart.totalPrice - pointsValue);
-      const pointsEarned = Math.floor(finalAmount); // 1 point per dollar
-      
-      console.log('Points value:', pointsValue, 'Final amount:', finalAmount, 'Points earned:', pointsEarned);
+      const pointsEarned = Math.floor(finalAmount);
+
+      // Determine payment method
+      const paymentMethod = createOrderDto.paymentMethod || 
+        (pointsToUse > 0 && finalAmount === 0 ? 'points' : 
+         pointsToUse > 0 && finalAmount > 0 ? 'hybrid' : 'stripe');
 
       // Create order
       const order = new this.orderModel({
@@ -101,7 +88,7 @@ export class OrdersService {
             productId: product._id,
             quantity: item.quantity,
             price: item.price,
-            title: product.title
+            title: product.title,
           };
         }),
         totalAmount: finalAmount,
@@ -109,69 +96,44 @@ export class OrdersService {
         pointsEarned,
         status: 'PENDING',
         shippingAddress: createOrderDto.shippingAddress,
-        paymentMethod: createOrderDto.paymentMethod || 'credit_card',
-        paymentDetails: createOrderDto.paymentDetails
+        paymentMethod,
+        paymentStatus: paymentMethod === 'points' ? 'paid' : 'pending',
       });
 
       const savedOrder = await order.save();
-      console.log('Order saved:', savedOrder._id);
 
-      // Update user loyalty points
-      const newPointsBalance = user.loyaltyPoints - pointsToUse + pointsEarned;
-      await this.userModel.findByIdAndUpdate(userId, {
-        loyaltyPoints: newPointsBalance
-      });
-      console.log('Updated user points from', user.loyaltyPoints, 'to', newPointsBalance);
+      // If payment is points-only, process immediately
+      if (paymentMethod === 'points') {
+        // Deduct points
+        await this.userModel.findByIdAndUpdate(userId, { 
+          $inc: { loyaltyPoints: -pointsToUse } 
+        });
 
-      // Update stock
-      for (const item of cart.items) {
-        const product = item.productId as any;
-        await this.productModel.findByIdAndUpdate(
-          product._id,
-          { $inc: { stock: -item.quantity } }
-        );
-      }
-
-      // Clear cart
-      await this.cartModel.findOneAndUpdate({ userId }, { items: [], totalPrice: 0 });
-      console.log('Cart cleared for user:', userId);
-
-      // Create payment record
-      if (createOrderDto.paymentDetails) {
-        try {
-          await this.paymentsService.create(userId, {
-            orderId: savedOrder._id.toString(),
-            amount: finalAmount,
-            paymentMethod: createOrderDto.paymentMethod || 'credit_card',
-            cardDetails: createOrderDto.paymentDetails
+        // Update stock
+        for (const item of cart.items) {
+          const product = item.productId as any;
+          await this.productModel.findByIdAndUpdate(product._id, { 
+            $inc: { stock: -item.quantity } 
           });
-          console.log('Payment record created for order:', savedOrder._id);
-        } catch (error) {
-          console.error('Failed to create payment record:', error);
         }
-      }
 
-      // Send notifications
-      try {
-        // Order notification
+        // Clear cart
+        await this.cartModel.findOneAndUpdate({ userId }, { items: [], totalPrice: 0 });
+
+        // Update order status
+        await this.orderModel.findByIdAndUpdate(savedOrder._id, { 
+          status: 'CONFIRMED',
+          paymentStatus: 'paid'
+        });
+
+        // Send notifications
         await this.notificationsService.createNotification({
           userId,
           title: 'Order Placed Successfully',
           message: `Your order #${savedOrder._id.toString().slice(-6)} has been placed successfully`,
           type: 'ORDER',
-          data: { orderId: savedOrder._id, status: 'PENDING' }
+          data: { orderId: savedOrder._id, status: 'CONFIRMED' },
         });
-
-        // Loyalty points notification
-        if (pointsEarned > 0) {
-          await this.notificationsService.createNotification({
-            userId,
-            title: 'Loyalty Points Earned',
-            message: `You earned ${pointsEarned} loyalty points from this order`,
-            type: 'LOYALTY',
-            data: { points: pointsEarned, action: 'earned' }
-          });
-        }
 
         if (pointsToUse > 0) {
           await this.notificationsService.createNotification({
@@ -179,52 +141,155 @@ export class OrdersService {
             title: 'Loyalty Points Used',
             message: `You used ${pointsToUse} loyalty points on this order`,
             type: 'LOYALTY',
-            data: { points: pointsToUse, action: 'used' }
+            data: { points: pointsToUse, action: 'used' },
           });
         }
-        console.log('Notifications saved for order:', savedOrder._id);
-      } catch (error) {
-        console.error('Failed to save notifications:', error);
+
+        return savedOrder;
+      }
+
+      // For Stripe or hybrid payment, create checkout session
+      if (paymentMethod === 'stripe' || paymentMethod === 'hybrid') {
+        const checkoutSession = await this.paymentsService.createCheckoutSession(
+          savedOrder._id.toString(),
+          userId,
+          finalAmount
+        );
+
+        // Deduct points immediately for hybrid (but not stock - wait for payment)
+        if (paymentMethod === 'hybrid' && pointsToUse > 0) {
+          await this.userModel.findByIdAndUpdate(userId, { 
+            $inc: { loyaltyPoints: -pointsToUse } 
+          });
+
+          await this.notificationsService.createNotification({
+            userId,
+            title: 'Loyalty Points Used',
+            message: `You used ${pointsToUse} loyalty points on this order`,
+            type: 'LOYALTY',
+            data: { points: pointsToUse, action: 'used' },
+          });
+        }
+
+        await this.notificationsService.createNotification({
+          userId,
+          title: 'Order Created',
+          message: `Complete your payment to confirm order #${savedOrder._id.toString().slice(-6)}`,
+          type: 'ORDER',
+          data: { orderId: savedOrder._id, status: 'PENDING' },
+        });
+
+        // Return checkout URL for redirect
+        return {
+          ...savedOrder.toObject(),
+          checkoutUrl: checkoutSession.url,
+          sessionId: checkoutSession.sessionId,
+        };
       }
 
       return savedOrder;
     } catch (error) {
-      console.error('Checkout error:', error.message, error.stack);
-      throw error; // Re-throw the error to be handled by the controller
+      console.error('Checkout error:', error);
+      throw error;
     }
   }
 
   async updateOrder(orderId: string, updateOrderDto: UpdateOrderDto): Promise<Order> {
-    const order = await this.orderModel.findByIdAndUpdate(orderId, updateOrderDto, { new: true });
+    const order = await this.orderModel.findById(orderId).populate('userId');
     if (!order) throw new NotFoundException('Order not found');
+
+    const oldPaymentStatus = order.paymentStatus;
+    const oldStatus = order.status;
+
+    // Update order
+    Object.assign(order, updateOrderDto);
+    await order.save();
+
+    // If payment status changed from pending to paid, process the order
+    if (oldPaymentStatus === 'pending' && updateOrderDto.paymentStatus === 'paid') {
+      const userId = typeof order.userId === 'object' ? (order.userId as any)._id : order.userId;
+      
+      console.log('Processing payment approval for order:', orderId);
+      console.log('User ID:', userId);
+      console.log('Points to award:', order.pointsEarned);
+
+      // Award loyalty points
+      if (order.pointsEarned > 0) {
+        const updatedUser = await this.userModel.findByIdAndUpdate(
+          userId,
+          { $inc: { loyaltyPoints: order.pointsEarned } },
+          { new: true }
+        );
+        
+        console.log('User updated, new loyalty points:', updatedUser?.loyaltyPoints);
+
+        await this.notificationsService.createNotification({
+          userId: userId.toString(),
+          title: 'Loyalty Points Earned',
+          message: `You earned ${order.pointsEarned} loyalty points from your order`,
+          type: 'LOYALTY',
+          data: { points: order.pointsEarned, action: 'earned', orderId },
+        });
+      }
+
+      // Update stock
+      for (const item of order.items) {
+        await this.productModel.findByIdAndUpdate(item.productId, {
+          $inc: { stock: -item.quantity }
+        });
+      }
+
+      // Clear user's cart
+      await this.cartModel.findOneAndUpdate(
+        { userId },
+        { items: [], totalPrice: 0 }
+      );
+
+      // Update order status to CONFIRMED if still PENDING
+      if (order.status === 'PENDING') {
+        order.status = 'CONFIRMED';
+        await order.save();
+      }
+
+      await this.notificationsService.createNotification({
+        userId: userId.toString(),
+        title: 'Payment Confirmed',
+        message: `Payment confirmed for order #${order._id.toString().slice(-6)}`,
+        type: 'ORDER',
+        data: { orderId: order._id, status: 'CONFIRMED' },
+      });
+    }
+
     return order;
   }
 
   async cancelOrder(userId: string, orderId: string): Promise<Order> {
     const order = await this.orderModel.findOne({ _id: orderId, userId });
     if (!order) throw new NotFoundException('Order not found');
-    
     if (!['PENDING', 'CONFIRMED'].includes(order.status.toUpperCase())) {
       throw new BadRequestException('Order cannot be cancelled');
     }
-    
     order.status = 'CANCELLED';
     await order.save();
     return order;
   }
 
-  async findAll(query?: { status?: string; page?: number; limit?: number }): Promise<{ orders: Order[]; total: number }> {
+  async findAll(query?: { status?: string; page?: number; limit?: number }) {
     const { status, page = 1, limit = 20 } = query || {};
     const filter: any = {};
     if (status) filter.status = status;
-    
     const skip = (page - 1) * limit;
     const [orders, total] = await Promise.all([
       this.orderModel.find(filter).populate('userId').skip(skip).limit(limit).exec(),
-      this.orderModel.countDocuments(filter).exec()
+      this.orderModel.countDocuments(filter).exec(),
     ]);
-    
     return { orders, total };
+  }
+
+  async findById(orderId: string): Promise<Order> {
+    const order = await this.orderModel.findById(orderId).populate('userId').exec();
+    if (!order) throw new NotFoundException('Order not found');
+    return order;
   }
 
   async getTotalCount(): Promise<number> {
@@ -234,7 +299,7 @@ export class OrdersService {
   async getTotalRevenue(): Promise<number> {
     const result = await this.orderModel.aggregate([
       { $match: { status: { $in: ['CONFIRMED', 'PROCESSING', 'SHIPPED', 'DELIVERED'] } } },
-      { $group: { _id: null, total: { $sum: '$totalAmount' } } }
+      { $group: { _id: null, total: { $sum: '$totalAmount' } } },
     ]);
     return result[0]?.total || 0;
   }

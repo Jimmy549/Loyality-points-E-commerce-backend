@@ -3,30 +3,30 @@ import { IsString, IsNumber, IsOptional, IsEnum, Min, ValidateNested, IsNotEmpty
 import { Type } from 'class-transformer';
 
 export class ShippingAddressDto {
-  @ApiProperty({ example: '123 Main St' })
-  @IsString()
-  @IsNotEmpty({ message: 'Street address is required' })
-  street: string;
+  @ApiProperty({ example: '123 Main St', required: false })
+  @IsString({ message: 'Street must be a string' })
+  @IsOptional()
+  street?: string;
 
-  @ApiProperty({ example: 'New York' })
-  @IsString()
-  @IsNotEmpty({ message: 'City is required' })
-  city: string;
+  @ApiProperty({ example: 'New York', required: false })
+  @IsString({ message: 'City must be a string' })
+  @IsOptional()
+  city?: string;
 
-  @ApiProperty({ example: 'NY' })
-  @IsString()
-  @IsNotEmpty({ message: 'State is required' })
-  state: string;
+  @ApiProperty({ example: 'NY', required: false })
+  @IsString({ message: 'State must be a string' })
+  @IsOptional()
+  state?: string;
 
-  @ApiProperty({ example: '10001' })
-  @IsString()
-  @IsNotEmpty({ message: 'Postal code is required' })
-  postalCode: string;
+  @ApiProperty({ example: '10001', required: false })
+  @IsString({ message: 'Postal code must be a string' })
+  @IsOptional()
+  postalCode?: string;
 
-  @ApiProperty({ example: 'USA' })
-  @IsString()
-  @IsNotEmpty({ message: 'Country is required' })
-  country: string;
+  @ApiProperty({ example: 'USA', required: false })
+  @IsString({ message: 'Country must be a string' })
+  @IsOptional()
+  country?: string;
 }
 
 class PaymentDetailsDto {
@@ -57,17 +57,22 @@ export class CreateOrderDto {
   @ApiProperty({ 
     description: 'Shipping address',
     type: ShippingAddressDto,
-    required: false
+    required: true
   })
   @ValidateNested()
   @Type(() => ShippingAddressDto)
-  @IsOptional()
-  shippingAddress?: ShippingAddressDto;
+  @IsNotEmpty({ message: 'Shipping address is required' })
+  shippingAddress: ShippingAddressDto;
 
-  @ApiProperty({ example: 'credit_card', enum: ['credit_card', 'debit_card', 'paypal'], required: false })
-  @IsEnum(['credit_card', 'debit_card', 'paypal'])
+  @ApiProperty({ 
+    example: 'stripe', 
+    enum: ['stripe', 'points', 'hybrid', 'money'], 
+    required: false,
+    description: 'Payment method for the order'
+  })
+  @IsEnum(['stripe', 'points', 'hybrid', 'money'], { message: 'Invalid payment method' })
   @IsOptional()
-  paymentMethod?: 'credit_card' | 'debit_card' | 'paypal';
+  paymentMethod?: 'stripe' | 'points' | 'hybrid' | 'money';
 
   @ApiProperty({ description: 'Payment details', type: PaymentDetailsDto, required: false })
   @ValidateNested()
@@ -92,6 +97,17 @@ export class UpdateOrderDto {
   })
   @IsOptional()
   status?: 'PENDING' | 'CONFIRMED' | 'PROCESSING' | 'SHIPPED' | 'DELIVERED' | 'CANCELLED';
+
+  @ApiProperty({ 
+    example: 'paid', 
+    enum: ['pending', 'paid', 'failed', 'refunded'],
+    required: false
+  })
+  @IsEnum(['pending', 'paid', 'failed', 'refunded'], {
+    message: 'Invalid payment status'
+  })
+  @IsOptional()
+  paymentStatus?: 'pending' | 'paid' | 'failed' | 'refunded';
 
   @ApiProperty({ example: 'TRK123456789', description: 'Tracking number', required: false })
   @IsString()

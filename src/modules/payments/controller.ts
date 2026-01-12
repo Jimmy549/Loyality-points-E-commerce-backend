@@ -1,26 +1,33 @@
-import { Controller, Post, Get, Body, Param, UseGuards } from '@nestjs/common';
+import { Controller, Post, Get, Body, Param, UseGuards, Req, Headers, RawBodyRequest } from '@nestjs/common';
 import { PaymentsService } from './service';
-import { CreatePaymentDto } from './dto';
 import { AuthGuard } from '../../common/guards/auth.guard';
 import { CurrentUser } from '../../common/decorators/user.decorator';
 
 @Controller('payments')
-@UseGuards(AuthGuard)
 export class PaymentsController {
   constructor(private readonly paymentsService: PaymentsService) {}
 
-  @Post()
-  async createPayment(@CurrentUser('id') userId: string, @Body() createPaymentDto: CreatePaymentDto) {
-    return this.paymentsService.create(userId, createPaymentDto);
+  @Post('create-checkout-session')
+  @UseGuards(AuthGuard)
+  async createCheckoutSession(
+    @CurrentUser('id') userId: string,
+    @Body() body: { orderId: string; amount: number }
+  ) {
+    return this.paymentsService.createCheckoutSession(body.orderId, userId, body.amount);
   }
 
-  @Get('order/:orderId')
-  async getPaymentByOrder(@Param('orderId') orderId: string) {
-    return this.paymentsService.findByOrderId(orderId);
+  @Post('webhook')
+  async handleWebhook(
+    @Req() req: any,
+    @Headers('stripe-signature') signature: string
+  ) {
+    const rawBody = req.body;
+    return this.paymentsService.handleWebhook(rawBody, signature);
   }
 
-  @Get('my-payments')
-  async getUserPayments(@CurrentUser('id') userId: string) {
-    return this.paymentsService.findUserPayments(userId);
+  @Get('verify/:sessionId')
+  @UseGuards(AuthGuard)
+  async verifySession(@Param('sessionId') sessionId: string) {
+    return this.paymentsService.verifySession(sessionId);
   }
 }
