@@ -17,8 +17,7 @@ export class PaymentsService {
     @InjectModel('User') private userModel: Model<User>,
     private notificationsService: NotificationsService,
   ) {
-    const stripeKey = process.env.STRIPE_SECRET_KEY || 'sk_test_dummy';
-    this.stripe = new Stripe(stripeKey, {
+    this.stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
       apiVersion: '2024-12-18.acacia' as any,
     });
   }

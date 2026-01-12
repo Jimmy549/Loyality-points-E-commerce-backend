@@ -200,20 +200,14 @@ export class OrdersService {
 
     const oldPaymentStatus = order.paymentStatus;
     const oldStatus = order.status;
+    const userId = typeof order.userId === 'object' ? (order.userId as any)._id : order.userId;
 
     // Update order
     Object.assign(order, updateOrderDto);
     await order.save();
 
-    // If payment status changed from pending to paid, process the order
-    if (oldPaymentStatus === 'pending' && updateOrderDto.paymentStatus === 'paid') {
-      const userId = typeof order.userId === 'object' ? (order.userId as any)._id : order.userId;
-      
-      console.log('Processing payment approval for order:', orderId);
-      console.log('User ID:', userId);
-      console.log('Points to award:', order.pointsEarned);
-
-      // Award loyalty points
+    // If status changed to DELIVERED, award loyalty points
+    if (oldStatus !== 'DELIVERED' && updateOrderDto.status === 'DELIVERED') {
       if (order.pointsEarned > 0) {
         const updatedUser = await this.userModel.findByIdAndUpdate(
           userId,
@@ -221,16 +215,22 @@ export class OrdersService {
           { new: true }
         );
         
-        console.log('User updated, new loyalty points:', updatedUser?.loyaltyPoints);
+        console.log('Loyalty points awarded on delivery:', order.pointsEarned);
+        console.log('User new loyalty points:', updatedUser?.loyaltyPoints);
 
         await this.notificationsService.createNotification({
           userId: userId.toString(),
           title: 'Loyalty Points Earned',
-          message: `You earned ${order.pointsEarned} loyalty points from your order`,
+          message: `You earned ${order.pointsEarned} loyalty points from your delivered order`,
           type: 'LOYALTY',
           data: { points: order.pointsEarned, action: 'earned', orderId },
         });
       }
+    }
+
+    // If payment status changed from pending to paid, process the order
+    if (oldPaymentStatus === 'pending' && updateOrderDto.paymentStatus === 'paid') {
+      console.log('Processing payment approval for order:', orderId);
 
       // Update stock
       for (const item of order.items) {
@@ -257,6 +257,17 @@ export class OrdersService {
         message: `Payment confirmed for order #${order._id.toString().slice(-6)}`,
         type: 'ORDER',
         data: { orderId: order._id, status: 'CONFIRMED' },
+      });
+    }
+
+    // Send notification for status change
+    if (oldStatus !== updateOrderDto.status && updateOrderDto.status) {
+      await this.notificationsService.createNotification({
+        userId: userId.toString(),
+        title: 'Order Status Updated',
+        message: `Your order #${order._id.toString().slice(-6)} status changed to ${updateOrderDto.status}`,
+        type: 'ORDER',
+        data: { orderId: order._id, status: updateOrderDto.status },
       });
     }
 
