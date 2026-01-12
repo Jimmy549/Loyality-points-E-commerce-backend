@@ -195,83 +195,85 @@ export class OrdersService {
   }
 
   async updateOrder(orderId: string, updateOrderDto: UpdateOrderDto): Promise<Order> {
-    const order = await this.orderModel.findById(orderId).populate('userId');
-    if (!order) throw new NotFoundException('Order not found');
+    try {
+      const order = await this.orderModel.findById(orderId).populate('userId');
+      if (!order) throw new NotFoundException('Order not found');
 
-    const oldPaymentStatus = order.paymentStatus;
-    const oldStatus = order.status;
-    const userId = typeof order.userId === 'object' ? (order.userId as any)._id : order.userId;
+      const oldPaymentStatus = order.paymentStatus;
+      const oldStatus = order.status;
+      const userId = typeof order.userId === 'object' ? (order.userId as any)._id : order.userId;
 
-    // Update order
-    Object.assign(order, updateOrderDto);
-    await order.save();
+      // Update order
+      Object.assign(order, updateOrderDto);
+      await order.save();
 
-    // If status changed to DELIVERED, award loyalty points
-    if (oldStatus !== 'DELIVERED' && updateOrderDto.status === 'DELIVERED') {
-      if (order.pointsEarned > 0) {
-        const updatedUser = await this.userModel.findByIdAndUpdate(
-          userId,
-          { $inc: { loyaltyPoints: order.pointsEarned } },
-          { new: true }
+      // If status changed to DELIVERED, award loyalty points
+      if (oldStatus !== 'DELIVERED' && updateOrderDto.status === 'DELIVERED') {
+        if (order.pointsEarned > 0) {
+          const updatedUser = await this.userModel.findByIdAndUpdate(
+            userId,
+            { $inc: { loyaltyPoints: order.pointsEarned } },
+            { new: true }
+          );
+          
+          console.log('Loyalty points awarded on delivery:', order.pointsEarned);
+
+          await this.notificationsService.createNotification({
+            userId: userId.toString(),
+            title: 'Loyalty Points Earned',
+            message: `You earned ${order.pointsEarned} loyalty points from your delivered order`,
+            type: 'LOYALTY',
+            data: { points: order.pointsEarned, action: 'earned', orderId },
+          });
+        }
+      }
+
+      // If payment status changed from pending to paid, process the order
+      if (oldPaymentStatus === 'pending' && updateOrderDto.paymentStatus === 'paid') {
+        // Update stock
+        for (const item of order.items) {
+          await this.productModel.findByIdAndUpdate(item.productId, {
+            $inc: { stock: -item.quantity }
+          });
+        }
+
+        // Clear user's cart
+        await this.cartModel.findOneAndUpdate(
+          { userId },
+          { items: [], totalPrice: 0 }
         );
-        
-        console.log('Loyalty points awarded on delivery:', order.pointsEarned);
-        console.log('User new loyalty points:', updatedUser?.loyaltyPoints);
+
+        // Update order status to CONFIRMED if still PENDING
+        if (order.status === 'PENDING') {
+          order.status = 'CONFIRMED';
+          await order.save();
+        }
 
         await this.notificationsService.createNotification({
           userId: userId.toString(),
-          title: 'Loyalty Points Earned',
-          message: `You earned ${order.pointsEarned} loyalty points from your delivered order`,
-          type: 'LOYALTY',
-          data: { points: order.pointsEarned, action: 'earned', orderId },
-        });
-      }
-    }
-
-    // If payment status changed from pending to paid, process the order
-    if (oldPaymentStatus === 'pending' && updateOrderDto.paymentStatus === 'paid') {
-      console.log('Processing payment approval for order:', orderId);
-
-      // Update stock
-      for (const item of order.items) {
-        await this.productModel.findByIdAndUpdate(item.productId, {
-          $inc: { stock: -item.quantity }
+          title: 'Payment Confirmed',
+          message: `Payment confirmed for order #${order._id.toString().slice(-6)}`,
+          type: 'ORDER',
+          data: { orderId: order._id, status: 'CONFIRMED' },
         });
       }
 
-      // Clear user's cart
-      await this.cartModel.findOneAndUpdate(
-        { userId },
-        { items: [], totalPrice: 0 }
-      );
-
-      // Update order status to CONFIRMED if still PENDING
-      if (order.status === 'PENDING') {
-        order.status = 'CONFIRMED';
-        await order.save();
+      // Send notification for status change
+      if (oldStatus !== updateOrderDto.status && updateOrderDto.status) {
+        await this.notificationsService.createNotification({
+          userId: userId.toString(),
+          title: 'Order Status Updated',
+          message: `Your order #${order._id.toString().slice(-6)} status changed to ${updateOrderDto.status}`,
+          type: 'ORDER',
+          data: { orderId: order._id, status: updateOrderDto.status },
+        });
       }
 
-      await this.notificationsService.createNotification({
-        userId: userId.toString(),
-        title: 'Payment Confirmed',
-        message: `Payment confirmed for order #${order._id.toString().slice(-6)}`,
-        type: 'ORDER',
-        data: { orderId: order._id, status: 'CONFIRMED' },
-      });
+      return order;
+    } catch (error) {
+      console.error('Update order error:', error);
+      throw error;
     }
-
-    // Send notification for status change
-    if (oldStatus !== updateOrderDto.status && updateOrderDto.status) {
-      await this.notificationsService.createNotification({
-        userId: userId.toString(),
-        title: 'Order Status Updated',
-        message: `Your order #${order._id.toString().slice(-6)} status changed to ${updateOrderDto.status}`,
-        type: 'ORDER',
-        data: { orderId: order._id, status: updateOrderDto.status },
-      });
-    }
-
-    return order;
   }
 
   async cancelOrder(userId: string, orderId: string): Promise<Order> {
