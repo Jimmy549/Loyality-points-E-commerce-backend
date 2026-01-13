@@ -6,8 +6,8 @@ import { Strategy } from 'passport-github2';
 export class GithubStrategy extends PassportStrategy(Strategy, 'github') {
   constructor() {
     super({
-      clientID: process.env.GITHUB_CLIENT_ID || 'dummy',
-      clientSecret: process.env.GITHUB_CLIENT_SECRET || 'dummy',
+      clientID: process.env.GITHUB_CLIENT_ID,
+      clientSecret: process.env.GITHUB_CLIENT_SECRET,
       callbackURL: `${process.env.BACKEND_URL}/auth/github/callback`,
       scope: ['user:email'],
     });
