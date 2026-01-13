@@ -30,4 +30,14 @@ export class PaymentsController {
   async verifySession(@Param('sessionId') sessionId: string) {
     return this.paymentsService.verifySession(sessionId);
   }
+
+  @Post('refund/:orderId')
+  @UseGuards(AuthGuard)
+  async refundPayment(
+    @CurrentUser('id') userId: string,
+    @Param('orderId') orderId: string,
+    @Body() body: { reason?: string }
+  ) {
+    return this.paymentsService.refundPayment(orderId, userId, body.reason);
+  }
 }

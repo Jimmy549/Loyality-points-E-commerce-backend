@@ -8,6 +8,7 @@ export const PaymentsSchema = new Schema({
   status: { type: String, enum: ['pending', 'succeeded', 'failed', 'canceled', 'refunded'], default: 'pending' },
   stripeSessionId: { type: String },
   stripePaymentIntentId: { type: String },
+  refundId: { type: String },
   transactionId: { type: String },
   processedAt: { type: Date },
   metadata: { type: Schema.Types.Mixed }

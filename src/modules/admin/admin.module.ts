@@ -3,6 +3,7 @@ import { AdminController } from './controller';
 import { ProductsModule } from '../products/products.module';
 import { UsersModule } from '../users/users.module';
 import { OrdersModule } from '../orders/orders.module';
+import { PaymentsModule } from '../payments/payments.module';
 import { RolesModule } from '../roles/roles.module';
 import { JwtModule } from '@nestjs/jwt';
 import { jwtConfig } from '../../config/jwt.config';
@@ -12,6 +13,7 @@ import { jwtConfig } from '../../config/jwt.config';
     ProductsModule,
     UsersModule,
     OrdersModule,
+    PaymentsModule,
     RolesModule,
     JwtModule.register(jwtConfig())
   ],

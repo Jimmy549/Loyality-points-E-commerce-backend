@@ -219,4 +219,47 @@ export class PaymentsService {
       throw new BadRequestException('Failed to verify session');
     }
   }
+
+  async refundPayment(orderId: string, userId: string, reason?: string) {
+    try {
+      const order = await this.orderModel.findById(orderId);
+      if (!order) throw new NotFoundException('Order not found');
+      if (order.userId.toString() !== userId) throw new BadRequestException('Unauthorized');
+      if (order.paymentStatus !== 'paid') throw new BadRequestException('Order not paid');
+      if ((order as any).paymentStatus === 'refunded') throw new BadRequestException('Already refunded');
+
+      const payment = await this.paymentModel.findOne({ orderId });
+      if (!(payment as any)?.stripePaymentIntentId) throw new BadRequestException('Payment intent not found');
+
+      const refund = await this.stripe.refunds.create({
+        payment_intent: (payment as any).stripePaymentIntentId,
+        reason: 'requested_by_customer',
+      });
+
+      await this.orderModel.findByIdAndUpdate(orderId, { paymentStatus: 'refunded', status: 'CANCELLED' });
+      await this.paymentModel.findByIdAndUpdate(payment._id, { status: 'refunded', refundId: refund.id });
+
+      // Deduct loyalty points if earned
+      if (order.pointsEarned > 0) {
+        const user = await this.userModel.findById(userId);
+        if (user) {
+          await this.userModel.findByIdAndUpdate(userId, {
+            loyaltyPoints: Math.max(0, user.loyaltyPoints - order.pointsEarned),
+          });
+        }
+      }
+
+      await this.notificationsService.createNotification({
+        userId,
+        title: 'Refund Processed',
+        message: `Your refund of $${order.totalAmount} has been processed.`,
+        type: 'ORDER',
+        data: { orderId, refundId: refund.id },
+      });
+
+      return { success: true, refundId: refund.id };
+    } catch (error) {
+      throw new BadRequestException(error.message || 'Refund failed');
+    }
+  }
 }

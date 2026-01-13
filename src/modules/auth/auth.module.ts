@@ -5,6 +5,9 @@ import { AuthController } from './controller';
 import { AuthService } from './service';
 import { UsersSchema } from '../users/schema';
 import { jwtConfig } from '../../config/jwt.config';
+import { GoogleStrategy } from './strategies/google.strategy';
+import { GithubStrategy } from './strategies/github.strategy';
+import { DiscordStrategy } from './strategies/discord.strategy';
 
 @Module({
   imports: [
@@ -12,7 +15,7 @@ import { jwtConfig } from '../../config/jwt.config';
     JwtModule.register(jwtConfig())
   ],
   controllers: [AuthController],
-  providers: [AuthService],
+  providers: [AuthService, GoogleStrategy, GithubStrategy, DiscordStrategy],
   exports: [AuthService, JwtModule]
 })
 export class AuthModule {}

@@ -98,4 +98,51 @@ export class AuthService {
       throw new UnauthorizedException('Login failed');
     }
   }
+
+  async socialLogin(userData: any) {
+    try {
+      console.log('Social login attempt:', userData.email, 'Provider:', userData.provider);
+      
+      let user = await this.userModel.findOne({ email: userData.email });
+      
+      if (!user) {
+        console.log('Creating new user from social login');
+        user = await this.userModel.create({
+          name: userData.name,
+          email: userData.email,
+          provider: userData.provider,
+          providerId: userData.providerId,
+          avatar: userData.avatar,
+          loyaltyPoints: 0,
+          role: 'USER'
+        });
+      } else if (user.provider === 'local' && userData.provider !== 'local') {
+        console.log('Linking social provider to existing local account');
+        user.provider = userData.provider;
+        user.providerId = userData.providerId;
+        user.avatar = userData.avatar || user.avatar;
+        await user.save();
+      }
+      
+      const { password, ...userResult } = user.toObject();
+      const payload = { 
+        sub: user._id, 
+        email: user.email, 
+        role: user.role,
+        iss: 'ecom-loyalty-backend',
+        aud: 'ecom-loyalty-frontend'
+      };
+      
+      const token = this.jwtService.sign(payload);
+      console.log('Social login successful for:', user.email);
+      
+      return {
+        access_token: token,
+        user: userResult
+      };
+    } catch (error) {
+      console.error('Social login error:', error.message);
+      throw new Error(`Social login failed: ${error.message}`);
+    }
+  }
 }

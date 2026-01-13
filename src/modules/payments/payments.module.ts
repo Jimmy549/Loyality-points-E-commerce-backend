@@ -7,6 +7,7 @@ import { UsersSchema } from '../users/schema';
 import { PaymentsService } from './service';
 import { PaymentsController } from './controller';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { EmailModule } from '../email/email.module';
 import { jwtConfig } from '../../config/jwt.config';
 
 @Module({
@@ -17,6 +18,7 @@ import { jwtConfig } from '../../config/jwt.config';
       { name: 'User', schema: UsersSchema }
     ]),
     NotificationsModule,
+    EmailModule,
     JwtModule.register(jwtConfig())
   ],
   controllers: [PaymentsController],

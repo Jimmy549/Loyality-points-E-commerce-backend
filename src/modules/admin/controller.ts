@@ -5,6 +5,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { ProductsService } from '../products/service';
 import { UsersService } from '../users/service';
 import { OrdersService } from '../orders/service';
+import { PaymentsService } from '../payments/service';
 import { CreateProductDto, UpdateProductDto } from '../products/dto';
 import { UpdateOrderDto } from '../orders/dto';
 
@@ -15,7 +16,8 @@ export class AdminController {
   constructor(
     private readonly productsService: ProductsService,
     private readonly usersService: UsersService,
-    private readonly ordersService: OrdersService
+    private readonly ordersService: OrdersService,
+    private readonly paymentsService: PaymentsService
   ) {}
 
   // Product Management
@@ -69,6 +71,13 @@ export class AdminController {
   @Patch('orders/:id')
   async patchOrder(@Param('id') id: string, @Body() updateOrderDto: UpdateOrderDto) {
     return this.ordersService.updateOrder(id, updateOrderDto);
+  }
+
+  @Post('orders/:id/refund')
+  async refundOrder(@Param('id') id: string, @Body() body: { reason?: string }) {
+    const order = await this.ordersService.findById(id);
+    if (!order) throw new Error('Order not found');
+    return this.paymentsService.refundPayment(id, order.userId.toString(), body.reason);
   }
 
   // Analytics
