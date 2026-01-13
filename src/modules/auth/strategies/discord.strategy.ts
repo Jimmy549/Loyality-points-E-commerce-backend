@@ -6,8 +6,8 @@ import { Strategy } from 'passport-discord';
 export class DiscordStrategy extends PassportStrategy(Strategy, 'discord') {
   constructor() {
     super({
-      clientID: process.env.DISCORD_CLIENT_ID,
-      clientSecret: process.env.DISCORD_CLIENT_SECRET,
+      clientID: process.env.DISCORD_CLIENT_ID || 'dummy',
+      clientSecret: process.env.DISCORD_CLIENT_SECRET || 'dummy',
       callbackURL: `${process.env.BACKEND_URL}/auth/discord/callback`,
       scope: ['identify', 'email'],
     });
