@@ -30,6 +30,12 @@ export class CartService {
     if (!cart) cart = new this.cartModel({ userId, items: [], totalPrice: 0 });
 
     const existingItem = cart.items.find(item => item.productId.toString() === addToCartDto.productId);
+    const requestedQuantity = (existingItem?.quantity || 0) + addToCartDto.quantity;
+
+    if (product.stock < requestedQuantity) {
+      throw new BadRequestException(`Insufficient stock. Total available: ${product.stock}`);
+    }
+
     const price = product.isOnSale ? product.salePrice : product.price;
 
     if (existingItem) {
@@ -56,7 +62,9 @@ export class CartService {
 
     const product = await this.productModel.findById(updateCartItemDto.productId);
     if (!product) throw new NotFoundException('Product not found');
-    if (product.stock < updateCartItemDto.quantity) throw new BadRequestException('Insufficient stock');
+    if (product.stock < updateCartItemDto.quantity) {
+      throw new BadRequestException(`Insufficient stock. Total available: ${product.stock}`);
+    }
 
     cart.items[itemIndex].quantity = updateCartItemDto.quantity;
     const price = product.isOnSale ? product.salePrice : product.price;

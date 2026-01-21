@@ -121,6 +121,11 @@ export class QueryProductsDto {
   @IsOptional()
   limit?: number;
 
+  @ApiProperty({ required: false, description: 'Filter by tag' })
+  @IsString()
+  @IsOptional()
+  tag?: string;
+
   @ApiProperty({ required: false, enum: ['price', '-price', 'title', 'createdAt', '-createdAt'], description: 'Sort field' })
   @IsString()
   @IsOptional()

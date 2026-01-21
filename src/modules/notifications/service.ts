@@ -8,7 +8,7 @@ export interface Notification {
   userId: string;
   title: string;
   message: string;
-  type: 'ORDER' | 'LOYALTY' | 'GENERAL';
+  type: 'ORDER' | 'LOYALTY' | 'GENERAL' | 'SALE';
   isRead: boolean;
   data?: any;
   createdAt?: Date;
@@ -36,7 +36,9 @@ export class NotificationsService {
   }
 
   async getUserNotifications(userId: string): Promise<Notification[]> {
-    return this.notificationModel.find({ userId }).sort({ createdAt: -1 }).limit(50).exec();
+    return this.notificationModel.find({ 
+      $or: [{ userId }, { userId: 'SYSTEM' }] 
+    }).sort({ createdAt: -1 }).limit(50).exec();
   }
 
   async getAdminNotifications(): Promise<Notification[]> {

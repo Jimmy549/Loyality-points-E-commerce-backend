@@ -15,6 +15,8 @@ export class PaymentsService {
     @InjectModel('Payment') private paymentModel: Model<Payment>,
     @InjectModel('Order') private orderModel: Model<Order>,
     @InjectModel('User') private userModel: Model<User>,
+    @InjectModel('Product') private productModel: Model<any>,
+    @InjectModel('Cart') private cartModel: Model<any>,
     private notificationsService: NotificationsService,
   ) {
     this.stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
@@ -116,39 +118,88 @@ export class PaymentsService {
   }
 
   private async handleCheckoutSessionCompleted(session: any) {
-    const orderId = session.metadata.orderId;
-    const userId = session.metadata.userId;
+    console.log(`[WebHook] Session completed: ${session.id}, status: ${session.payment_status}`);
+    if (session.payment_status === 'paid') {
+      await this.confirmOrder(session.id, session.metadata.orderId, session.metadata.userId, session.payment_intent);
+    }
+  }
 
+  private async confirmOrder(sessionId: string, orderId: string, userId: string, paymentIntentId: string) {
+    console.log(`[ConfirmOrder] Starting confirmation for Order: ${orderId}, User: ${userId}`);
+    
     const order = await this.orderModel.findById(orderId);
     if (!order) {
-      console.error('Order not found for session:', session.id);
+      console.error('[ConfirmOrder] Order not found:', orderId);
+      return;
+    }
+
+    // Skip if already confirmed
+    if (order.status === 'CONFIRMED' && order.paymentStatus === 'paid') {
+      console.log(`[ConfirmOrder] Order ${orderId} already confirmed, skipping.`);
       return;
     }
 
     // Update order status
     await this.orderModel.findByIdAndUpdate(orderId, {
       paymentStatus: 'paid',
-      stripePaymentIntentId: session.payment_intent,
+      stripePaymentIntentId: paymentIntentId,
       status: 'CONFIRMED',
     });
+    console.log(`[ConfirmOrder] Order ${orderId} status updated to CONFIRMED/paid`);
+
+    // Update stock for each item in the order
+    try {
+      for (const item of order.items) {
+        await this.productModel.findByIdAndUpdate(item.productId, {
+          $inc: { stock: -item.quantity }
+        });
+      }
+      console.log(`[ConfirmOrder] Stock updated for order items`);
+    } catch (error) {
+      console.error('[ConfirmOrder] Failed to update stock:', error.message);
+    }
+
+    // Clear user's cart
+    try {
+      await this.cartModel.findOneAndUpdate(
+        { userId },
+        { items: [], totalPrice: 0 }
+      );
+      console.log(`[ConfirmOrder] User cart cleared`);
+    } catch (error) {
+      console.error('[ConfirmOrder] Failed to clear cart:', error.message);
+    }
 
     // Update payment record
-    await this.paymentModel.findOneAndUpdate(
-      { stripeSessionId: session.id },
-      {
-        status: 'succeeded',
-        stripePaymentIntentId: session.payment_intent,
-        processedAt: new Date(),
-      }
-    );
+    try {
+      await this.paymentModel.findOneAndUpdate(
+        { stripeSessionId: sessionId },
+        {
+          status: 'succeeded',
+          stripePaymentIntentId: paymentIntentId,
+          processedAt: new Date(),
+        }
+      );
+      console.log(`[ConfirmOrder] Payment record updated`);
+    } catch (error) {
+      console.error('[ConfirmOrder] Failed to update payment record:', error.message);
+    }
 
-    // Add loyalty points to user (only after successful payment)
-    if (order.pointsEarned > 0) {
-      const user = await this.userModel.findById(userId);
-      if (user) {
-        await this.userModel.findByIdAndUpdate(userId, {
-          loyaltyPoints: user.loyaltyPoints + order.pointsEarned,
-        });
+    // Add loyalty points to user
+    if (order.pointsEarned && order.pointsEarned > 0) {
+      console.log(`[ConfirmOrder] Awarding ${order.pointsEarned} points to User: ${userId}`);
+      try {
+        const updatedUser = await this.userModel.findByIdAndUpdate(
+          userId,
+          { $inc: { loyaltyPoints: order.pointsEarned } },
+          { new: true }
+        );
+        
+        if (updatedUser) {
+          console.log(`[ConfirmOrder] Success! User ${userId} now has ${updatedUser.loyaltyPoints} points`);
+        } else {
+          console.error(`[ConfirmOrder] User ${userId} not found when awarding points`);
+        }
 
         // Send notification
         await this.notificationsService.createNotification({
@@ -158,19 +209,27 @@ export class PaymentsService {
           type: 'LOYALTY',
           data: { points: order.pointsEarned, action: 'earned', orderId },
         });
+      } catch (error) {
+        console.error('[ConfirmOrder] Failed to award points/notify:', error.message);
       }
+    } else {
+      console.log(`[ConfirmOrder] No points to award for this order (PointsEarned: ${order.pointsEarned})`);
     }
 
     // Send order confirmation notification
-    await this.notificationsService.createNotification({
-      userId,
-      title: 'Payment Successful',
-      message: `Your payment for order #${orderId.toString().slice(-6)} has been confirmed!`,
-      type: 'ORDER',
-      data: { orderId, status: 'CONFIRMED', paymentStatus: 'paid' },
-    });
+    try {
+      await this.notificationsService.createNotification({
+        userId,
+        title: 'Payment Successful',
+        message: `Your payment for order #${orderId.toString().slice(-6)} has been confirmed!`,
+        type: 'ORDER',
+        data: { orderId, status: 'CONFIRMED', paymentStatus: 'paid' },
+      });
+    } catch (error) {
+      console.error('[ConfirmOrder] Failed to send order notification:', error.message);
+    }
 
-    console.log(`Order ${orderId} payment completed successfully`);
+    console.log(`[ConfirmOrder] Order ${orderId} confirmation process completed`);
   }
 
   private async handlePaymentIntentSucceeded(paymentIntent: any) {
@@ -206,14 +265,27 @@ export class PaymentsService {
   }
 
   async verifySession(sessionId: string) {
+    console.log(`[VerifySession] Verifying session: ${sessionId}`);
     try {
       const session = await this.stripe.checkout.sessions.retrieve(sessionId);
-      const order = await this.orderModel.findOne({ stripeSessionId: sessionId });
+      let order = await this.orderModel.findOne({ stripeSessionId: sessionId });
+
+      console.log(`[VerifySession] Stripe status: ${session.payment_status}, Local Order Status: ${order?.status}`);
+
+      // If session is paid but order is still pending, manually confirm it
+      if (session.payment_status === 'paid' && order && (order.status === 'PENDING' || order.paymentStatus === 'pending')) {
+        console.log(`[VerifySession] Manual confirmation triggered for order: ${order._id}`);
+        await this.confirmOrder(session.id, order._id.toString(), order.userId.toString(), session.payment_intent as string);
+        order = await this.orderModel.findById(order._id);
+      }
+
+      const user = order ? await this.userModel.findById(order.userId).select('-password') : null;
 
       return {
         sessionId: session.id,
         paymentStatus: session.payment_status,
         order: order,
+        user: user,
       };
     } catch (error) {
       throw new BadRequestException('Failed to verify session');

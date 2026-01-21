@@ -74,10 +74,9 @@ export class OrdersService {
       const finalAmount = Math.max(0, cart.totalPrice - pointsValue);
       const pointsEarned = Math.floor(finalAmount);
 
-      // Determine payment method
-      const paymentMethod = createOrderDto.paymentMethod || 
-        (pointsToUse > 0 && finalAmount === 0 ? 'points' : 
-         pointsToUse > 0 && finalAmount > 0 ? 'hybrid' : 'stripe');
+      // Determine payment method (logic moved here to be used in deduction too)
+      const paymentMethod = (pointsToUse > 0 && finalAmount === 0) ? 'points' : 
+                            (pointsToUse > 0 && finalAmount > 0) ? 'hybrid' : 'stripe';
 
       // Create order
       const order = new this.orderModel({
@@ -105,9 +104,11 @@ export class OrdersService {
       // If payment is points-only, process immediately
       if (paymentMethod === 'points') {
         // Deduct points
-        await this.userModel.findByIdAndUpdate(userId, { 
-          $inc: { loyaltyPoints: -pointsToUse } 
-        });
+        if (pointsToUse > 0) {
+          await this.userModel.findByIdAndUpdate(userId, { 
+            $inc: { loyaltyPoints: -pointsToUse } 
+          });
+        }
 
         // Update stock
         for (const item of cart.items) {
@@ -145,7 +146,11 @@ export class OrdersService {
           });
         }
 
-        return savedOrder;
+        const updatedUser = await this.userModel.findById(userId).select('-password');
+        return { 
+          ...savedOrder.toObject(),
+          user: updatedUser 
+        };
       }
 
       // For Stripe or hybrid payment, create checkout session
@@ -156,8 +161,8 @@ export class OrdersService {
           finalAmount
         );
 
-        // Deduct points immediately for hybrid (but not stock - wait for payment)
-        if (paymentMethod === 'hybrid' && pointsToUse > 0) {
+        // Deduct points immediately (but not stock - wait for payment)
+        if (pointsToUse > 0) {
           await this.userModel.findByIdAndUpdate(userId, { 
             $inc: { loyaltyPoints: -pointsToUse } 
           });
@@ -180,10 +185,14 @@ export class OrdersService {
         });
 
         // Return checkout URL for redirect
+        const updatedUser = await this.userModel.findById(userId).select('-password');
+
+        // Return checkout URL for redirect and updated user
         return {
           ...savedOrder.toObject(),
           checkoutUrl: checkoutSession.url,
           sessionId: checkoutSession.sessionId,
+          user: updatedUser
         };
       }
 
@@ -207,8 +216,8 @@ export class OrdersService {
       Object.assign(order, updateOrderDto);
       await order.save();
 
-      // If status changed to DELIVERED, award loyalty points
-      if (oldStatus !== 'DELIVERED' && updateOrderDto.status === 'DELIVERED') {
+      // If status changed to CONFIRMED, award loyalty points
+      if (oldStatus !== 'CONFIRMED' && updateOrderDto.status === 'CONFIRMED') {
         if (order.pointsEarned > 0) {
           const updatedUser = await this.userModel.findByIdAndUpdate(
             userId,
@@ -216,12 +225,12 @@ export class OrdersService {
             { new: true }
           );
           
-          console.log('Loyalty points awarded on delivery:', order.pointsEarned);
+          console.log('Loyalty points awarded on confirmation:', order.pointsEarned);
 
           await this.notificationsService.createNotification({
             userId: userId.toString(),
             title: 'Loyalty Points Earned',
-            message: `You earned ${order.pointsEarned} loyalty points from your delivered order`,
+            message: `You earned ${order.pointsEarned} loyalty points from your order`,
             type: 'LOYALTY',
             data: { points: order.pointsEarned, action: 'earned', orderId },
           });

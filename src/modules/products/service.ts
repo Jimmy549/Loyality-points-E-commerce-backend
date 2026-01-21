@@ -4,18 +4,24 @@ import { Model } from 'mongoose';
 import { Product } from './product.interface';
 import { CreateProductDto, UpdateProductDto, QueryProductsDto } from './dto';
 import { NotificationGateway } from '../notifications/notification.gateway';
+import { NotificationsService } from '../notifications/service';
 
 @Injectable()
 export class ProductsService {
   constructor(
     @InjectModel('Product') private productModel: Model<Product>,
-    private notificationGateway: NotificationGateway
+    private notificationGateway: NotificationGateway,
+    private notificationsService: NotificationsService
   ) {}
 
   async findAll(query?: QueryProductsDto): Promise<{ products: any[]; total: number; page: number; pages: number }> {
-    const { search, category, loyaltyType, onSale, minPrice, maxPrice, page = 1, limit = 20, sortBy = 'createdAt' } = query || {};
+    const { search, category, loyaltyType, onSale, minPrice, maxPrice, tag, page = 1, limit = 20, sortBy = 'createdAt' } = query || {};
     
     const filter: any = {};
+    
+    if (tag) {
+      filter.tags = tag;
+    }
     
     if (search) {
       filter.$text = { $search: search };
@@ -144,6 +150,15 @@ export class ProductsService {
       originalPrice: product.price,
       salePrice: product.salePrice,
       message: `🔥 Sale Alert! ${product.title} is now on sale!`
+    });
+
+    // Save persistent sale notification for all users
+    await this.notificationsService.createNotification({
+      userId: 'SYSTEM',
+      title: '🔥 New Sale Alert!',
+      message: `${product.title} is now on sale for $${product.salePrice}!`,
+      type: 'SALE',
+      data: { productId: product._id }
     });
     
     return product;
